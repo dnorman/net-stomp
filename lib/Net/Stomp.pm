@@ -10,7 +10,7 @@ our $VERSION = '0.38_99';
 
 __PACKAGE__->mk_accessors( qw(
     _cur_host failover hostname hosts port select serial session_id socket ssl
-    ssl_options subscriptions _connect_headers bufsize
+    ssl_options subscriptions _connect_headers bufsize reconnect timeout
 ) );
 
 sub new {
@@ -18,6 +18,7 @@ sub new {
     my $self  = $class->SUPER::new(@_);
 
     $self->bufsize(8192) unless $self->bufsize;
+    $self->reconnect(1)  unless defined $self->reconnect;
 
     $self->{_framebuf} = "";
 
@@ -50,12 +51,15 @@ sub new {
         while($@) {
             eval { $self->_get_connection };
             last unless $@;
+            die "Failed to connect" unless $self->reconnect;
+
             if (!@hosts || $self->_cur_host == $#hosts ) {
                 # We've cycled through all setup hosts. Die now. Can't die because
                 # $@ is localized.
                 $err = $@;
                 last;
             }
+
             sleep(5);
         }
     }
@@ -79,7 +83,7 @@ sub _get_connection {
         PeerAddr => $self->hostname,
         PeerPort => $self->port,
         Proto    => 'tcp',
-        Timeout  => 5
+        Timeout  => $self->timeout || 5
     );
     if ( $self->ssl ) {
         eval { require IO::Socket::SSL };
@@ -133,6 +137,8 @@ sub _reconnect {
     }
     eval { $self->_get_connection };
     while ($@) {
+        die "Failed to connect" unless $self->reconnect;
+
         sleep(5);
         eval { $self->_get_connection };
     }
